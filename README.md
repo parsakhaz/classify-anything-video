@@ -12,37 +12,136 @@
 
 A Python script that automatically classifies aspects of video frames using Moondream for visual analysis and LLaMA for question formulation. The script processes videos frame by frame and overlays classification results directly onto the video.
 
-## Features
+## Process Flow Diagram
 
-- **Flexible Frame Extraction**:
-  - Time-based sampling (e.g., one frame every N seconds)
-  - Fixed total frame count (evenly spaced throughout video)
+```mermaid
+graph TD
+    A[Input Video] --> B[Frame Extraction]
+    B --> C[Frame Analysis]
+    
+    subgraph Model Setup
+        M1[Ollama LLaMA] --> M[Model Selection]
+        M2[HuggingFace LLaMA] --> M[Model Selection]
+        M --> D1[Setup Authentication/Install]
+    end
+    
+    subgraph Frame Analysis
+        C --> D[Moondream Analysis]
+        D --> E[Generate Questions]
+        E --> F[Get Classification]
+        F --> G{Response > 6 words?}
+        G -->|Yes| H[Add Hint Suffix]
+        H --> F
+        G -->|No| I[Store Result]
+        I --> J{All Aspects Done?}
+        J -->|No| F
+        J -->|Yes| K[Next Frame]
+    end
+    
+    subgraph Video Generation
+        K --> L[Pre-calculate Max Box Size]
+        L --> N[Process Each Frame]
+        N --> O[Create Semi-transparent Overlay]
+        O --> P[Add Timestamp & Classifications]
+        P --> Q[Blend with Original Frame]
+    end
+    
+    Q --> R[Classified Video]
+    I --> S[JSON Data Export]
+```
 
-- **Customizable Classification**:
-  - Default aspects include:
-    1. Time of day
-    2. Weather conditions
-    3. Number of people
-    4. Main activity
-    5. Lighting quality
-  - Add custom aspects via command line or interactive input
+```
+Input Video
+    │
+    ▼
+┌─────────────────┐
+│  Model Setup    │
+├─────────────────┤
+│ ┌─────────────┐ │
+│ │Ollama LLaMA │ │
+│ │     or      │ │    ┌─────────────┐
+│ │HuggingFace  │ │───▶│Auto Install/│
+│ └─────────────┘ │    │   Setup     │
+└────────┬────────┘    └─────────────┘
+         │
+         ▼
+┌─────────────────┐
+│Frame Extraction │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Frame Analysis  │◄─────────────┐
+├─────────────────┤              │
+│1. Moondream     │              │
+│2. Process Each  │              │
+│   Aspect:       │              │
+│   a. Query      │              │
+│   b. Check Len  │     Add Hint Suffix:
+│   c. Retry?     │     - "Use fewer words"
+└────────┬────────┘     - "Keep it short"
+         │              - "Be concise"
+         ▼              - "Short response only"
+    Word Count ≤ 6? ────────────┘
+         │
+         ▼
+┌─────────────────┐
+│Video Generation │
+├─────────────────┤
+│1. Pre-calc Size │     ┌──────────────┐
+│2. Process Frames│────▶│  JSON Data   │
+│3. Add Overlay   │     └──────────────┘
+│4. Add Text      │
+│5. Blend (0.7/0.3│
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Final Output    │
+└─────────────────┘
+```
 
-- **Intelligent Question Generation**:
-  - Structured prompts for consistent results
-  - Smart retry mechanism for invalid responses
-  - Context-aware question formatting
-  - Optimized for concise answers
+## Detailed Process Flow
 
-- **Professional Overlay**:
-  - Dynamic font sizing based on video dimensions
-  - Semi-transparent background for readability
-  - Timestamp display
-  - Clean, organized layout of results
+1. **Model Selection & Setup**
+   - Choose between local Ollama LLaMA (recommended) or HuggingFace LLaMA
+   - For Ollama: Automatic installation and setup if not present
+   - For HuggingFace: Requires authentication and model access approval
 
-- **Data Export**:
-  - JSON output with all classifications
-  - Timestamps for each frame
-  - Complete classification history
+2. **Video Input**
+   - Place video files in the `inputs` folder
+   - Supports .mp4, .avi, .mov, and .mkv formats
+   - Configure frame extraction interval or total frames to analyze
+
+3. **Aspect Selection**
+   - Use default aspects or specify custom ones
+   - Default aspects include:
+     - Weather conditions
+     - Mood
+     - Camera angle
+     - Clothing color and type
+     - Subject gender and hair color
+     - Main activity
+     - Pose
+     - Background
+     - Expression
+
+4. **Frame Processing**
+   - Extracts frames at specified intervals
+   - Each frame is analyzed by Moondream model
+   - Responses are limited to 6 words maximum for clarity
+   - Multiple attempts to get concise answers if needed
+
+5. **Video Generation**
+   - Creates overlay with classification results
+   - Consistent caption box sized for longest response
+   - Semi-transparent black overlay for readability
+   - Timestamp and all classifications shown
+   - Exports annotated video to `outputs` folder
+
+6. **Data Export**
+   - Saves complete classification data in JSON format
+   - Includes timestamps and all classification results
 
 ## Prerequisites
 
@@ -99,35 +198,29 @@ pip install -r requirements.txt
 
 ## Usage
 
-1. Place your video files in the `inputs` folder
-2. Run the script:
-   ```bash
-   # Default: Extract one frame every second
-   python classify-video.py
+```bash
+python classify-video.py [options]
 
-   # Custom frame interval (e.g., every 5 seconds)
-   python classify-video.py --frame-interval 5
-
-   # Fixed number of total frames
-   python classify-video.py --total-frames 30
-
-   # Custom aspects to classify
-   python classify-video.py --aspects "time of day,weather,activity"
-   ```
+Options:
+  --token TEXT            HuggingFace token (if using HF model)
+  --frame-interval FLOAT  Extract one frame every N seconds (default: 1.0)
+  --total-frames INT      Total number of frames to extract
+  --aspects TEXT         Comma-separated aspects to classify
+```
 
 ## Output
 
-- **Classified Video**:
-  - Saved in `outputs` folder as `classified_[original_name].mp4`
-  - Original video with overlaid classifications
-  - Professional text rendering with dynamic sizing
-  - Timestamp display
+### Classified Video
+- Saved in `outputs` folder as `classified_[original_name].mp4`
+- Original video with overlaid classifications
+- Professional text rendering with dynamic sizing
+- Timestamp display
 
-- **Classification Data**:
-  - JSON file with complete results
-  - Frame timestamps
-  - All classifications per frame
-  - Saved as `data_[original_name].json`
+### Classification Data
+- JSON file with complete results
+- Frame timestamps
+- All classifications per frame
+- Saved as `data_[original_name].json`
 
 ## Troubleshooting
 

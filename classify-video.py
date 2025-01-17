@@ -337,7 +337,30 @@ def classify_frame(
     for aspect, question in zip(aspects, questions):
         print(f"Processing aspect: {aspect}")
         print(f"Question: {question}")
-        answer = model.query(frame, question)["answer"].strip()
+        
+        # Try up to 10 times to get a concise answer
+        max_attempts = 10
+        suffixes = [
+            " Use fewer words.",
+            " Keep it short.",
+            " Be concise.",
+            " Short response only."
+        ]
+        base_question = question
+        
+        for attempt in range(max_attempts):
+            answer = model.query(frame, question)["answer"].strip()
+            word_count = len(answer.split())
+            
+            if word_count <= 6:
+                break
+                
+            if attempt < max_attempts - 1:
+                print(f"Response too long ({word_count} words), regenerating...")
+                # Cycle through suffixes, repeating if necessary
+                suffix = suffixes[attempt % len(suffixes)]
+                question = base_question + suffix
+        
         results[aspect] = answer
         print(f"Answer: {answer}")
     return results
@@ -434,6 +457,32 @@ def create_classified_video(
     frame_height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
     
+    # Define constants
+    margin = 8
+    padding = 10
+    
+    # Pre-calculate maximum text width needed across all frames
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    line_count = len(frame_results[0]) + 1  # +1 for timestamp
+    min_line_height = 20  # minimum pixels per line
+    required_height = line_count * min_line_height + 20  # +20 for margins
+    box_height = min(int(frame_height * 0.3), required_height)
+    line_height = (box_height - 2 * padding) // line_count
+    font_scale = min(line_height / 30, 0.5)
+    
+    max_text_width = 0
+    for result_idx, result in enumerate(frame_results):
+        texts = [f"T: {timestamps[result_idx]:.1f}s"]
+        for aspect, value in result.items():
+            texts.append(f"{aspect}: {value}")
+        
+        for text in texts:
+            (text_width, _), _ = cv2.getTextSize(text, font, font_scale, 1)
+            max_text_width = max(max_text_width, text_width)
+    
+    # Set box width based on maximum text (with padding) but limit to 40% of screen width
+    box_width = min(int(frame_width * 0.4), max_text_width + 2 * padding)
+    
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(
         output_path,
@@ -457,13 +506,46 @@ def create_classified_video(
                current_time >= timestamps[result_idx + 1]):
             result_idx += 1
         
-        # Add classifications to frame
+        # Add classifications to frame using pre-calculated box dimensions
         if result_idx < len(frame_results):
-            frame = add_classifications_to_frame(
-                frame,
-                frame_results[result_idx],
-                timestamps[result_idx]
-            )
+            overlay = frame.copy()
+            
+            # Draw black semi-transparent box with consistent size
+            cv2.rectangle(overlay, 
+                         (margin, margin),
+                         (margin + box_width, margin + box_height),
+                         (0, 0, 0),
+                         -1)
+            
+            # Add text
+            x = margin + padding
+            y = margin + padding + line_height
+            
+            # Timestamp
+            cv2.putText(overlay,
+                        f"T: {timestamps[result_idx]:.1f}s",
+                        (x, y),
+                        font,
+                        font_scale,
+                        (255, 255, 255),
+                        1,
+                        cv2.LINE_AA)
+            
+            # Classifications
+            y += line_height
+            for aspect, result in frame_results[result_idx].items():
+                cv2.putText(overlay,
+                           f"{aspect}: {result}",
+                           (x, y),
+                           font,
+                           font_scale,
+                           (255, 255, 255),
+                           1,
+                           cv2.LINE_AA)
+                y += line_height
+            
+            # Blend overlay with original frame
+            cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
         
         out.write(frame)
         frame_count += 1
@@ -518,14 +600,14 @@ def main():
     # Default classification aspects
     default_aspects = [
         "weather conditions",
+        "mood",
         "camera angle",
         "color of clothing on subject",
         "type of clothing on subject",
-        "gender of subject",
-        "age of subject",
+        "emotion of main subject",
+        "gender of main subject",
         "main activity",
         "pose",
-        "mood",
         "background",
         "expression",
     ]
